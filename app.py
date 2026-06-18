@@ -4064,7 +4064,6 @@ def _safe_agent_count(logged_in: bool) -> int:
 @app.context_processor
 def inject_layout_context():
     logged_in = bool(session.get("logged_in"))
-    _ad = load_ad_config()
     routers = []
     if logged_in:
         owner = _current_owner_id() or ""
@@ -4079,11 +4078,11 @@ def inject_layout_context():
         "routers": routers,
         "active_router": get_active_router() if logged_in else None,
         "current_page": request.endpoint or "",
-        "adsense_pub_id":       _ad.get("adsensePubId", "") or os.environ.get("ADSENSE_PUB_ID", ""),
-        "adsense_banner_slot":  _ad.get("adsenseBannerSlot", ""),
-        "adsense_inter_slot":   _ad.get("adsenseInterSlot", ""),
-        "adsterra_banner_code": _ad.get("adsterraBannerCode", ""),
-        "adsterra_inter_code":  _ad.get("adsterraInterCode", ""),
+        "adsense_pub_id":       os.environ.get("ADSENSE_PUB_ID", ""),
+        "adsense_banner_slot":  "",
+        "adsense_inter_slot":   "",
+        "adsterra_banner_code": "",
+        "adsterra_inter_code":  "",
         "_css_ver": _get_css_ver(),
         "_js_ver": _get_js_ver(),
         "_pwa_ver": _get_pwa_ver(),
