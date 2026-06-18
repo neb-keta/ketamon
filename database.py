@@ -1568,6 +1568,31 @@ def db_upsert_router_relay_snapshots(router_id: str, resources: dict):
     if not router_id or not isinstance(resources, dict):
         return 0
     now = datetime.now().isoformat()
+
+    resource_keys = {str(k or "").strip() for k in resources if str(k or "").strip()}
+    is_user_chunk_only = (resource_keys == {"/ip/hotspot/user"})
+
+    conn = get_conn()
+
+    # Pour les POSTs contenant uniquement /ip/hotspot/user (chunks v7),
+    # accumuler au lieu d'écraser : comparer updated_at de relay-status vs users.
+    # Si users a été mis à jour APRÈS relay-status → même cycle → APPEND.
+    # Sinon (nouveau cycle ou premier chunk) → REPLACE.
+    append_users = False
+    if is_user_chunk_only:
+        rs_row = conn.execute(
+            "SELECT updated_at FROM router_relay_snapshots WHERE router_id=? AND resource=?",
+            (router_id, "/ketamon/relay-status")
+        ).fetchone()
+        u_row = conn.execute(
+            "SELECT updated_at FROM router_relay_snapshots WHERE router_id=? AND resource=?",
+            (router_id, "/ip/hotspot/user")
+        ).fetchone()
+        rs_ts = rs_row["updated_at"] if rs_row else None
+        u_ts = u_row["updated_at"] if u_row else None
+        if rs_ts and u_ts and u_ts > rs_ts:
+            append_users = True
+
     rows = []
     for resource, data in resources.items():
         resource = str(resource or "").strip()
@@ -1579,6 +1604,28 @@ def db_upsert_router_relay_snapshots(router_id: str, resources: dict):
             normalized = [dict(item) for item in data if isinstance(item, dict)]
         else:
             normalized = []
+
+        if resource == "/ip/hotspot/user" and append_users:
+            existing_row = conn.execute(
+                "SELECT data FROM router_relay_snapshots WHERE router_id=? AND resource=?",
+                (router_id, "/ip/hotspot/user")
+            ).fetchone()
+            existing = []
+            if existing_row:
+                try:
+                    existing = json.loads(existing_row["data"] or "[]")
+                    if not isinstance(existing, list):
+                        existing = []
+                except Exception:
+                    existing = []
+            existing_keys = {str(u.get(".id") or u.get("name") or "") for u in existing}
+            for u in normalized:
+                k = str(u.get(".id") or u.get("name") or "")
+                if k not in existing_keys:
+                    existing.append(u)
+                    existing_keys.add(k)
+            normalized = existing
+
         rows.append({
             "router_id": router_id,
             "resource": resource,
@@ -1587,7 +1634,6 @@ def db_upsert_router_relay_snapshots(router_id: str, resources: dict):
         })
     if not rows:
         return 0
-    conn = get_conn()
     conn.executemany("""
         INSERT INTO router_relay_snapshots(router_id, resource, data, updated_at)
         VALUES(:router_id, :resource, :data, :updated_at)
